@@ -37,8 +37,7 @@ def home():
     return {"message": "SecureAI Rate Limiting API is running"}
 
 def get_client_key(request: Request, user_id: str):
-    client_ip = request.client.host
-    return f"{user_id}:{client_ip}"
+    return request.client.host
 
 def check_rate_limit(key: str):
     now = time.time()
