@@ -1,11 +1,25 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import time
 import logging
 from typing import Dict
 
 app = FastAPI()
+
+@app.get("/")
+def home():
+    return {"message": "SecureAI Rate Limiting API is running"}
+
+# ✅ Enable CORS (required for exam portal / browser access)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins (safe for exam submission)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -19,6 +33,11 @@ class SecurityRequest(BaseModel):
     userId: str
     input: str
     category: str
+
+# ✅ Optional root route (prevents Not Found on browser root)
+@app.get("/")
+def home():
+    return {"message": "SecureAI Rate Limiting API is running"}
 
 def get_client_key(request: Request, user_id: str):
     client_ip = request.client.host
@@ -88,6 +107,7 @@ async def validate(request: Request, body: SecurityRequest):
         )
 
     except Exception:
+        logging.error("Validation error occurred")
         return JSONResponse(
             status_code=400,
             content={
