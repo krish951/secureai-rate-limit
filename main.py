@@ -5,17 +5,14 @@ from pydantic import BaseModel
 import time
 import logging
 from typing import Dict
+from collections import defaultdict
 
 app = FastAPI()
 
-@app.get("/")
-def home():
-    return {"message": "SecureAI Rate Limiting API is running"}
-
-# ✅ Enable CORS (required for exam portal / browser access)
+# ✅ Enable CORS (important for exam portal)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (safe for exam submission)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -24,17 +21,17 @@ app.add_middleware(
 logging.basicConfig(level=logging.INFO)
 
 MAX_REQUESTS_PER_MINUTE = 22
-BURST_CAPACITY = 7
-REFILL_RATE = MAX_REQUESTS_PER_MINUTE / 60
+BURST_LIMIT = 7
+WINDOW_SIZE = 60  # seconds
 
-rate_limit_store: Dict[str, dict] = {}
+# Store request timestamps per user/IP
+request_log = defaultdict(list)
 
 class SecurityRequest(BaseModel):
     userId: str
     input: str
     category: str
 
-# ✅ Optional root route (prevents Not Found on browser root)
 @app.get("/")
 def home():
     return {"message": "SecureAI Rate Limiting API is running"}
@@ -45,25 +42,27 @@ def get_client_key(request: Request, user_id: str):
 
 def check_rate_limit(key: str):
     now = time.time()
-    bucket = rate_limit_store.get(key)
+    window_start = now - WINDOW_SIZE
 
-    if not bucket:
-        rate_limit_store[key] = {
-            "tokens": BURST_CAPACITY,
-            "last_refill": now
-        }
-        bucket = rate_limit_store[key]
+    # Remove requests outside 60-second window
+    request_log[key] = [
+        timestamp for timestamp in request_log[key]
+        if timestamp > window_start
+    ]
 
-    elapsed = now - bucket["last_refill"]
-    refill_tokens = elapsed * REFILL_RATE
-    bucket["tokens"] = min(BURST_CAPACITY, bucket["tokens"] + refill_tokens)
-    bucket["last_refill"] = now
+    current_count = len(request_log[key])
 
-    if bucket["tokens"] < 1:
-        retry_after = max(1, int((1 - bucket["tokens"]) / REFILL_RATE))
+    # Burst protection
+    if current_count >= BURST_LIMIT:
+        retry_after = WINDOW_SIZE
         return False, retry_after
 
-    bucket["tokens"] -= 1
+    # Overall per-minute protection
+    if current_count >= MAX_REQUESTS_PER_MINUTE:
+        retry_after = WINDOW_SIZE
+        return False, retry_after
+
+    request_log[key].append(now)
     return True, None
 
 @app.post("/api/security/validate")
